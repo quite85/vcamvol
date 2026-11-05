@@ -127,7 +127,18 @@ static void VVPost(const char *name) {
     dispatch_async(dispatch_get_main_queue(), ^{ [self show]; });
 }
 
+- (void)hideOverlay {
+    // 延迟隐藏，等 alert 收完动画，避免把用户下一次点击吃掉
+    __weak typeof(self) ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        ws->_win.hidden = YES;
+        VVLog(@"overlay hidden (touches restored)");
+    });
+}
+
 - (void)show {
+    _win.hidden = NO;
     [self window];
     UIViewController *from = [self top];
     if ([from isKindOfClass:[UIAlertController class]]) return;
@@ -144,7 +155,8 @@ static void VVPost(const char *name) {
                                                         preferredStyle:UIAlertControllerStyleAlert];
 
     [ac addAction:[UIAlertAction actionWithTitle:@"选择视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        VVPost(NOTIFY_CHOOSE);                     // 让 Virtual Cam 弹它自己的相册选择器
+        VVPost(NOTIFY_CHOOSE);
+        [[VVPanel shared] hideOverlay];                     // 让 Virtual Cam 弹它自己的相册选择器
     }]];
 
     if (on) {
@@ -154,6 +166,7 @@ static void VVPost(const char *name) {
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
             VVPost(NOTIFY_TOGGLE);
+            [[VVPanel shared] hideOverlay];
         }]];
     } else {
         [ac addAction:[UIAlertAction actionWithTitle:@"恢复替换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -163,10 +176,13 @@ static void VVPost(const char *name) {
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
             VVPost(NOTIFY_TOGGLE);
+            [[VVPanel shared] hideOverlay];
         }]];
     }
 
-    [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
+        [[VVPanel shared] hideOverlay];
+    }]];
     [from presentViewController:ac animated:YES completion:^{
         VVLog(@"present completion: presented=%@", from.presentedViewController);
     }];

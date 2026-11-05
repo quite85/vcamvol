@@ -9,6 +9,7 @@ TWEAK_NAME = vcamvol
 vcamvol_FILES = Tweak.x
 vcamvol_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-function
 vcamvol_FRAMEWORKS = UIKit Foundation AVFoundation PhotosUI
+vcamvol_LIBRARIES = substrate
 vcamvol_PRIVATE_FRAMEWORKS =
 
 include $(THEOS_MAKE_PATH)/tweak.mk

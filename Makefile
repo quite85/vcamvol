@@ -12,4 +12,11 @@ vcamvol_FRAMEWORKS = UIKit Foundation AVFoundation PhotosUI CoreImage CoreMedia 
 vcamvol_LIBRARIES = substrate
 vcamvol_PRIVATE_FRAMEWORKS =
 
+TOOL_NAME = vcamgrader
+vcamgrader_FILES = tool/main.m
+vcamgrader_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+vcamgrader_FRAMEWORKS = Foundation AVFoundation CoreImage CoreMedia CoreVideo
+vcamgrader_INSTALL_PATH = /usr/libexec
+
 include $(THEOS_MAKE_PATH)/tweak.mk
+include $(THEOS_MAKE_PATH)/tool.mk

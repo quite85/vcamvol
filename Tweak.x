@@ -421,84 +421,6 @@ static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
     }];
 }
 
-// 后台线程：盯着 vcam.mp4，一旦被 Virtual Cam 换掉就自动调色
-//
-// 两条铁律（都踩过）：
-//   1) %ctor 跑在 dyld 初始化阶段，这里绝对不能做文件 IO / 起线程，否则 SpringBoard 直接 SIGSEGV
-//      → 所有活都延迟 15 秒后再干
-//   2) 用「能否写 DCIM」实测决定由哪个进程执行（mediaserverd 注入不稳定，SpringBoard 每次都能注入）
-static void vv_auto_grade(void) {
-    static BOOL running = NO;
-    if (running) return;
-    running = YES;
-    VVLog(@"AG0 scheduled (pid=%d)", getpid());
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-            @try {
-                NSString *pname = [[NSProcessInfo processInfo] processName];
-                NSFileManager *fm = [NSFileManager defaultManager];
-
-                NSString *probe = @"/var/mobile/Media/DCIM/.vcamvol-write-test";
-                BOOL canWrite = [@"ok" writeToFile:probe atomically:YES
-                                           encoding:NSUTF8StringEncoding error:nil];
-                if (canWrite) [fm removeItemAtPath:probe error:NULL];
-                VVLog(@"AG1 pid=%d name=%@ canWriteDCIM=%d", getpid(), pname, canWrite);
-                if (!canWrite) {
-                    VVLog(@"AG2 skip: 没有 DCIM 写权限");
-                    return;
-                }
-
-                NSString *sig = vv_file_sig(VCAM_SRC);
-                NSString *saved = [NSString stringWithContentsOfFile:VCAM_STATE
-                                                            encoding:NSUTF8StringEncoding error:nil];
-                if (!saved && sig) {
-                    [sig writeToFile:VCAM_STATE atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                    saved = sig;
-                }
-                VVLog(@"AG5 loop start saved=%@", saved);
-
-                while (YES) {
-                    @autoreleasepool {
-                        NSString *now = vv_file_sig(VCAM_SRC);
-                        NSString *last = [NSString stringWithContentsOfFile:VCAM_STATE
-                                                                   encoding:NSUTF8StringEncoding error:nil];
-                        if (now && ![now isEqualToString:(last ?: @"")]) {
-                            [NSThread sleepForTimeInterval:3.0];
-                            NSString *check = vv_file_sig(VCAM_SRC);
-                            if ([check isEqualToString:now]) {
-                                NSDictionary *attrs = [fm attributesOfItemAtPath:VCAM_SRC error:nil];
-                                unsigned long long size = attrs ? [attrs fileSize] : 0;
-                                if (size > 20000) {
-                                    VVLog(@"AG6 new video %llu bytes, grading...", size);
-                                    __block BOOL finished = NO;
-                                    vv_grade_file(VCAM_SRC, VCAM_TMP, ^{ finished = YES; });
-                                    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:300];
-                                    while (!finished && [deadline timeIntervalSinceNow] > 0) {
-                                        [NSThread sleepForTimeInterval:0.5];
-                                    }
-                                    NSString *after = vv_file_sig(VCAM_SRC);
-                                    [after writeToFile:VCAM_STATE atomically:YES
-                                              encoding:NSUTF8StringEncoding error:nil];
-                                    VVLog(@"AG7 done sig=%@", after);
-                                } else {
-                                    [check writeToFile:VCAM_STATE atomically:YES
-                                              encoding:NSUTF8StringEncoding error:nil];
-                                    VVLog(@"AG6 skip small file (%llu)", size);
-                                }
-                            }
-                        }
-                        [NSThread sleepForTimeInterval:2.0];
-                    }
-                }
-            } @catch (NSException *e) {
-                VVLog(@"AG9 exception %@", e);
-            }
-        });
-    });
-}
-
 %ctor {
     @autoreleasepool {
         // === 只做最安全的事：打一条日志 + 挂音量钩子 ===
@@ -524,8 +446,7 @@ static void vv_auto_grade(void) {
             VVLog(@"deferred: start background work (pid=%d)", getpid());
             @try {
             vv_install_l10n();
-            vv_watch_frontmost();
-            vv_auto_grade();
+            // vv_watch_frontmost();  // 停用：后台线程调用 SpringBoard 私有函数有崩溃风险
             // vv_startPoll();  // 已停用：AVAudioSession 在 SpringBoard 里会崩
 
             // 每 15 秒给 Virtual Cam 发一次 prepare，保持解码器热状态

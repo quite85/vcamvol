@@ -201,19 +201,29 @@ static float vv_volume(void) {
 }
 
 static void vv_startPoll(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        __block float last = vv_volume();
-        VVLog(@"poll start volume=%.2f", last);
-        NSTimer *t = [NSTimer timerWithTimeInterval:0.15 repeats:YES block:^(NSTimer *timer) {
-            float v = vv_volume();
-            if (v < 0) return;
-            if (last >= 0 && v < last - 0.01f) {
-                VVLog(@"poll: volume drop %.2f->%.2f", last, v);
-                [[VVPanel shared] trigger];
+    // 用后台线程轮询，不依赖主队列/runloop（SpringBoard 早期主队列定时器不生效）
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        float last = vv_volume();
+        VVLog(@"poll start volume=%.3f", last);
+        CFAbsoluteTime lastBeat = CFAbsoluteTimeGetCurrent();
+        int n = 0;
+        while (YES) {
+            @autoreleasepool {
+                float v = vv_volume();
+                n++;
+                // 每 2 秒报告一次当前音量，方便确认它在工作
+                if (CFAbsoluteTimeGetCurrent() - lastBeat > 2.0) {
+                    lastBeat = CFAbsoluteTimeGetCurrent();
+                    VVLog(@"beat #%d volume=%.3f", n, v);
+                }
+                if (v >= 0 && last >= 0 && v < last - 0.01f) {
+                    VVLog(@"poll: volume DROP %.3f -> %.3f", last, v);
+                    [[VVPanel shared] trigger];
+                }
+                if (v >= 0) last = v;
+                [NSThread sleepForTimeInterval:0.15];
             }
-            last = v;
-        }];
-        [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+        }
     });
 }
 

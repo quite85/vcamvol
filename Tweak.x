@@ -64,6 +64,18 @@ static void VVPost(const char *name) {
 
 #pragma mark - 面板
 
+// 不拦截触摸的视图：只有子视图（比如弹窗按钮）才响应，其余触点直接穿透给系统
+@interface VVPassthroughView : UIView
+@end
+@implementation VVPassthroughView
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    for (UIView *v in self.subviews) {
+        if ([v pointInside:[v convertPoint:point fromView:self] withEvent:event]) return YES;
+    }
+    return NO;
+}
+@end
+
 @interface VVPanel : NSObject
 + (instancetype)shared;
 - (void)trigger;
@@ -106,6 +118,7 @@ static void VVPost(const char *name) {
     w.windowLevel = 10000001.0;
     w.backgroundColor = [UIColor clearColor];
     UIViewController *vc = [UIViewController new];
+    vc.view = [[VVPassthroughView alloc] initWithFrame:w.bounds];
     vc.view.backgroundColor = [UIColor clearColor];
     w.rootViewController = vc;
     w.hidden = NO;
@@ -125,6 +138,11 @@ static void VVPost(const char *name) {
     _last = now;
     VVLog(@"volume down -> panel");
     dispatch_async(dispatch_get_main_queue(), ^{ [self show]; });
+}
+
+- (void)hideNow {
+    _win.hidden = YES;
+    VVLog(@"overlay hidden NOW (touches restored)");
 }
 
 - (void)hideOverlay {
@@ -159,7 +177,7 @@ static void VVPost(const char *name) {
 
     [ac addAction:[UIAlertAction actionWithTitle:@"选择视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         VVPost(NOTIFY_CHOOSE);
-        [[VVPanel shared] hideOverlay];                     // 让 Virtual Cam 弹它自己的相册选择器
+        [[VVPanel shared] hideNow];                     // 让 Virtual Cam 弹它自己的相册选择器
     }]];
 
     if (on) {
@@ -169,7 +187,7 @@ static void VVPost(const char *name) {
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
             VVPost(NOTIFY_TOGGLE);
-            [[VVPanel shared] hideOverlay];
+            [[VVPanel shared] hideNow];
         }]];
     } else {
         [ac addAction:[UIAlertAction actionWithTitle:@"恢复替换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -179,12 +197,12 @@ static void VVPost(const char *name) {
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
             VVPost(NOTIFY_TOGGLE);
-            [[VVPanel shared] hideOverlay];
+            [[VVPanel shared] hideNow];
         }]];
     }
 
     [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-        [[VVPanel shared] hideOverlay];
+        [[VVPanel shared] hideNow];
     }]];
     [from presentViewController:ac animated:YES completion:^{
         VVLog(@"present completion: presented=%@", from.presentedViewController);

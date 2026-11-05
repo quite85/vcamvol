@@ -132,8 +132,11 @@ static void VVPost(const char *name) {
     __weak typeof(self) ws = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        ws->_win.hidden = YES;
-        VVLog(@"overlay hidden (touches restored)");
+        VVPanel *strongSelf = ws;
+        if (strongSelf) {
+            strongSelf->_win.hidden = YES;
+            VVLog(@"overlay hidden (touches restored)");
+        }
     });
 }
 

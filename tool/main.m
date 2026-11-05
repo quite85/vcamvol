@@ -92,9 +92,18 @@ static BOOL grade(NSString *src, NSString *dst) {
     ex.outputFileType = AVFileTypeMPEG4;
     ex.shouldOptimizeForNetworkUse = YES;
 
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [ex exportAsynchronouslyWithCompletionHandler:^{ dispatch_semaphore_signal(sem); }];
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    // 命令行环境下必须靠 run loop 推进导出，不能死等信号量
+    [ex exportAsynchronouslyWithCompletionHandler:^{}];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:600];
+    while (ex.status == AVAssetExportSessionStatusWaiting ||
+           ex.status == AVAssetExportSessionStatusExporting ||
+           ex.status == AVAssetExportSessionStatusUnknown) {
+        if ([limit timeIntervalSinceNow] < 0) break;
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+        }
+    }
 
     if (ex.status != AVAssetExportSessionStatusCompleted) {
         LOG(@"导出失败 status=%ld err=%@", (long)ex.status, ex.error);

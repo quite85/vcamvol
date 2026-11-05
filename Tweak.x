@@ -422,9 +422,10 @@ static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
 
 // 后台线程：盯着 vcam.mp4，一旦被 Virtual Cam 换掉就自动调色
 static void vv_auto_grade(void) {
-    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
-    if (![bid isEqualToString:@"com.apple.springboard"]) {
-        VVLog(@"auto-grade: 跳过（pid=%d bid=%@）", getpid(), bid);
+    VVLog(@"AG1 enter pid=%d", getpid());
+    // SpringBoard 才有 SBVolumeControl；mediaserverd 里没有，用它来区分，避免重复转码
+    if (!objc_getClass("SBVolumeControl")) {
+        VVLog(@"AG2 not-SpringBoard, skip");
         return;
     }
     static BOOL running = NO;

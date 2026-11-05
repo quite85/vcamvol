@@ -21,7 +21,7 @@
 #define NOTIFY_CHOOSE "com.551uk.virtualcam.choose"
 #define NOTIFY_TOGGLE "com.551uk.virtualcam.toggle"
 #define NOTIFY_STATE  "com.551uk.virtualcam.statechanged"
-#define LOG_PATH      @"/var/mobile/Library/vcamvol.log"
+#define LOG_PATH      @"/tmp/vcamvol.log"
 
 static void VVLog(NSString *fmt, ...) {
     va_list ap; va_start(ap, fmt);

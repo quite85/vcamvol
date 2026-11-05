@@ -245,6 +245,7 @@ static float vv_volume(void) {
         return -1.0f;
     }
 }
+static void vv_startPoll(void) __attribute__((unused));
 static void vv_startPoll(void) {
     // 用后台线程轮询，不依赖主队列/runloop（SpringBoard 早期主队列定时器不生效）
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -521,11 +522,11 @@ static void vv_auto_grade(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             VVLog(@"deferred: start background work (pid=%d)", getpid());
-
+            @try {
             vv_install_l10n();
             vv_watch_frontmost();
             vv_auto_grade();
-            vv_startPoll();
+            // vv_startPoll();  // 已停用：AVAudioSession 在 SpringBoard 里会崩
 
             // 每 15 秒给 Virtual Cam 发一次 prepare，保持解码器热状态
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -537,6 +538,9 @@ static void vv_auto_grade(void) {
                 }
             });
             VVLog(@"deferred: background work running");
+            } @catch (NSException *e) {
+                VVLog(@"deferred exception: %@", e);
+            }
         });
     }
 }

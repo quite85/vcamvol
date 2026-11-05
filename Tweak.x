@@ -83,17 +83,36 @@ static void VVPost(const char *name) {
 
 - (UIWindow *)window {
     if (_win) return _win;
-    UIWindow *w = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    w.windowLevel = 10000001.0;          // 高于 alert 层
+    UIWindow *w = nil;
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *scene = nil;
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *ws = (UIWindowScene *)s;
+                if (ws.activationState == UISceneActivationStateForegroundActive) { scene = ws; break; }
+                if (!scene) scene = ws;
+            }
+        }
+        VVLog(@"window: scene=%p activation=%ld", scene, (long)scene.activationState);
+        if (scene) {
+            w = [[UIWindow alloc] initWithWindowScene:scene];
+            w.frame = scene.coordinateSpace.bounds;
+        }
+    }
+    if (!w) {
+        VVLog(@"window: fallback initWithFrame");
+        w = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    }
+    w.windowLevel = 10000001.0;
     w.backgroundColor = [UIColor clearColor];
     UIViewController *vc = [UIViewController new];
     vc.view.backgroundColor = [UIColor clearColor];
     w.rootViewController = vc;
     w.hidden = NO;
     _win = w; _host = vc;
+    VVLog(@"window ready: %@ level=%.0f hidden=%d", w, w.windowLevel, w.hidden);
     return w;
 }
-
 - (UIViewController *)top {
     UIViewController *vc = _host;
     while (vc.presentedViewController) vc = vc.presentedViewController;
@@ -119,6 +138,7 @@ static void VVPost(const char *name) {
         ? [NSString stringWithFormat:@"当前：已替换\n%@", [[cfg[@"sourcePath"] lastPathComponent] ?: @"?" description]]
         : @"当前：使用手机摄像头";
 
+    VVLog(@"show: from=%@", from);
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Virtual Cam"
                                                                message:msg
                                                         preferredStyle:UIAlertControllerStyleAlert];
@@ -147,7 +167,9 @@ static void VVPost(const char *name) {
     }
 
     [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [from presentViewController:ac animated:YES completion:nil];
+    [from presentViewController:ac animated:YES completion:^{
+        VVLog(@"present completion: presented=%@", from.presentedViewController);
+    }];
 }
 
 @end

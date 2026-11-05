@@ -15,6 +15,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <dlfcn.h>
 
 #define VCAM_CONFIG   @"/var/mobile/Media/DCIM/vcam.plist"
 #define NOTIFY_CHOOSE "com.551uk.virtualcam.choose"

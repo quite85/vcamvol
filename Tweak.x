@@ -176,30 +176,16 @@ static BOOL vv_hookFirst(NSString *clsName, NSArray<NSString *> *sels) {
     return NO;
 }
 
-// 兜底：轮询系统音量。SpringBoard 里 Celestial 一定已加载，直接取类即可
+// 读取系统音量：用公开 API AVAudioSession，不碰私有方法，避免签名不匹配崩溃
 static float vv_volume(void) {
-    static id ctl; static SEL sel; static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        Class c = NSClassFromString(@"AVSystemController");
-        if (c) {
-            ctl = ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("sharedAVSystemController"));
-            sel = NSSelectorFromString(@"getVolume:forCategory:");
-        }
-        VVLog(@"AVSystemController ctl=%p sel=%p", ctl, sel);
-    });
-    if (!ctl || !sel) return -1;
-    NSMethodSignature *sig = [ctl methodSignatureForSelector:sel];
-    if (!sig) return -1;
-    float v = -1; NSString *cat = @"Audio/Video";
-    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-    inv.target = ctl; inv.selector = sel;
-    [inv setArgument:&v atIndex:2];
-    [inv setArgument:&cat atIndex:3];
-    @try { [inv invoke]; } @catch (NSException *e) { return -1; }
-    [inv getArgument:&v atIndex:2];
-    return v;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ VVLog(@"volume source: AVAudioSession.outputVolume"); });
+    @try {
+        return [[AVAudioSession sharedInstance] outputVolume];
+    } @catch (NSException *e) {
+        return -1.0f;
+    }
 }
-
 static void vv_startPoll(void) {
     // 用后台线程轮询，不依赖主队列/runloop（SpringBoard 早期主队列定时器不生效）
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{

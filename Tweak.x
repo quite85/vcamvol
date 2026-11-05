@@ -270,7 +270,6 @@ static void vv_startPoll(void) {
             }
         }
     });
-    });
 }
 
 

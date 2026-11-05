@@ -348,6 +348,136 @@ static void vv_watch_frontmost(void) {
     });
 }
 
+
+#pragma mark - 自动调色：选完视频后由本插件在后台重编码，补偿 Virtual Cam 的 gamma 1.83
+
+#define VCAM_SRC   @"/var/mobile/Media/DCIM/vcam.mp4"
+#define VCAM_TMP   @"/var/mobile/Media/DCIM/.vcamvol-grade.mp4"
+#define VCAM_STATE @"/var/mobile/Media/DCIM/.vcamvol-grade.state"
+
+static NSString *vv_file_sig(NSString *path) {
+    NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    if (!a) return nil;
+    return [NSString stringWithFormat:@"%llu-%.0f", [a fileSize],
+            [[a fileModificationDate] timeIntervalSince1970]];
+}
+
+// 用 AVFoundation 导出：对每一帧套 CIGammaAdjust(0.5464) 抵消 Virtual Cam 的 1.83 压缩
+static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:src] options:nil];
+    if ([[asset tracksWithMediaType:AVMediaTypeVideo] count] == 0) {
+        VVLog(@"grade: 没有视频轨，跳过");
+        if (done) done();
+        return;
+    }
+
+    AVMutableVideoComposition *comp =
+        [AVMutableVideoComposition videoCompositionWithAsset:asset
+                                   applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *req) {
+        CIImage *img = req.sourceImage;
+        @try {
+            CIFilter *g = [CIFilter filterWithName:@"CIGammaAdjust"];
+            [g setValue:@(0.5464) forKey:@"inputPower"];
+            [g setValue:img forKey:kCIInputImageKey];
+            CIImage *o = g.outputImage;
+            if (o) img = o;
+        } @catch (NSException *e) {}
+        [req finishWithImage:img context:nil];
+    }];
+
+    AVAssetExportSession *ex = [[AVAssetExportSession alloc] initWithAsset:asset
+                                                             presetName:AVAssetExportPresetHighestQuality];
+    if (!ex) { VVLog(@"grade: 无法创建导出会话"); if (done) done(); return; }
+    ex.videoComposition = comp;
+    ex.outputURL = [NSURL fileURLWithPath:dst];
+    ex.outputFileType = AVFileTypeMPEG4;
+    ex.shouldOptimizeForNetworkUse = YES;
+    VVLog(@"grade: 开始转码 %@ -> %@", src, dst);
+
+    [ex exportAsynchronouslyWithCompletionHandler:^{
+        if (ex.status == AVAssetExportSessionStatusCompleted) {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSError *err = nil;
+            [fm removeItemAtPath:src error:NULL];
+            if ([fm moveItemAtPath:dst toPath:src error:&err]) {
+                VVLog(@"grade: 完成，已替换 vcam.mp4");
+                // 递增 generation，让 Virtual Cam 重新读取
+                NSMutableDictionary *c = VVReadConfig();
+                NSInteger gen = [c[@"generation"] integerValue] + 1;
+                c[@"generation"] = @(gen);
+                c[@"enabled"] = @YES;
+                c[@"masterEnabled"] = @YES;
+                VVWriteConfig(c);
+                VVPost(NOTIFY_STATE);
+            } else {
+                VVLog(@"grade: 替换失败 %@", err);
+            }
+        } else {
+            VVLog(@"grade: 失败 status=%ld err=%@", (long)ex.status, ex.error);
+            [[NSFileManager defaultManager] removeItemAtPath:dst error:NULL];
+        }
+        if (done) done();
+    }];
+}
+
+// 后台线程：盯着 vcam.mp4，一旦被 Virtual Cam 换掉就自动调色
+static void vv_auto_grade(void) {
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (![bid isEqualToString:@"com.apple.springboard"]) {
+        VVLog(@"auto-grade: 跳过（pid=%d bid=%@）", getpid(), bid);
+        return;
+    }
+    static BOOL running = NO;
+    if (running) return;
+    running = YES;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        // 首次启动把当前文件记为“已处理”，避免每次 respring 都重转一遍
+        NSString *sig = vv_file_sig(VCAM_SRC);
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *saved = [NSString stringWithContentsOfFile:VCAM_STATE encoding:NSUTF8StringEncoding error:nil];
+        if (!saved && sig) {
+            [sig writeToFile:VCAM_STATE atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            saved = sig;
+        }
+        VVLog(@"auto-grade: 启动，当前签名=%@", saved);
+
+        while (YES) {
+            @autoreleasepool {
+                NSString *now = vv_file_sig(VCAM_SRC);
+                NSString *last = [NSString stringWithContentsOfFile:VCAM_STATE
+                                                           encoding:NSUTF8StringEncoding error:nil];
+                if (now && ![now isEqualToString:last ?: @""]) {
+                    [NSThread sleepForTimeInterval:3.0];   // 等复制完成
+                    NSString *check = vv_file_sig(VCAM_SRC);
+                    if ([check isEqualToString:now]) {
+                        NSDictionary *attrs = [fm attributesOfItemAtPath:VCAM_SRC error:nil];
+                        unsigned long long size = [attrs fileSize];
+                        if (size > 20000) {
+                            VVLog(@"auto-grade: 检测到新视频 (%llu bytes)，开始调色", size);
+                            __block BOOL finished = NO;
+                            vv_grade_file(VCAM_SRC, VCAM_TMP, ^{ finished = YES; });
+                            // 同步等待，避免并发转码
+                            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:300];
+                            while (!finished && [deadline timeIntervalSinceNow] > 0) {
+                                [NSThread sleepForTimeInterval:0.5];
+                            }
+                            NSString *after = vv_file_sig(VCAM_SRC);
+                            [after writeToFile:VCAM_STATE atomically:YES
+                                      encoding:NSUTF8StringEncoding error:nil];
+                            VVLog(@"auto-grade: 处理结束，新签名=%@", after);
+                        } else {
+                            [check writeToFile:VCAM_STATE atomically:YES
+                                      encoding:NSUTF8StringEncoding error:nil];
+                        }
+                    }
+                }
+                [NSThread sleepForTimeInterval:2.0];
+            }
+        }
+    });
+}
+
 %ctor {
     @autoreleasepool {
         VVLog(@"===== vcamvol loaded (pid %d) =====", getpid());
@@ -366,6 +496,7 @@ static void vv_watch_frontmost(void) {
         VVLog(@"volume hook bound=%d", bound);
         vv_install_l10n();
         vv_watch_frontmost();
+        vv_auto_grade();
 
         // 每 15 秒给 Virtual Cam 发一次 prepare，让解码器保持热状态，
         // 减少打开相机时那几秒真实画面闪动

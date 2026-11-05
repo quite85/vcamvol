@@ -8,7 +8,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = vcamvol
 vcamvol_FILES = Tweak.x
 vcamvol_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-function
-vcamvol_FRAMEWORKS = UIKit Foundation AVFoundation PhotosUI
+vcamvol_FRAMEWORKS = UIKit Foundation AVFoundation PhotosUI CoreImage CoreMedia CoreVideo
 vcamvol_LIBRARIES = substrate
 vcamvol_PRIVATE_FRAMEWORKS =
 

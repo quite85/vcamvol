@@ -1,0 +1,9 @@
+Package: com.local.vcamvol
+Name: VCam Volume Panel
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: 按音量减弹出面板：选择视频 / 禁止替换。驱动 551UK Virtual Cam（不重写它的核心）。
+Maintainer: local
+Author: local
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)

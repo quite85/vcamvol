@@ -421,32 +421,33 @@ static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
 }
 
 // 后台线程：盯着 vcam.mp4，一旦被 Virtual Cam 换掉就自动调色
-// 说明：
-//   1) 必须延迟启动——dyld 初始化阶段起线程会踩到未就绪的 ObjC 运行时，导致 SpringBoard 崩溃
-//   2) 由 mediaserverd 里的实例执行——相机服务有 DCIM 写权限，SpringBoard 的沙盒会被拒
+//
+// 两条铁律（都踩过）：
+//   1) %ctor 跑在 dyld 初始化阶段，这里绝对不能做文件 IO / 起线程，否则 SpringBoard 直接 SIGSEGV
+//      → 所有活都延迟 15 秒后再干
+//   2) 用「能否写 DCIM」实测决定由哪个进程执行（mediaserverd 注入不稳定，SpringBoard 每次都能注入）
 static void vv_auto_grade(void) {
-    NSString *pname = [[NSProcessInfo processInfo] processName];
-    // 用实测写权限决定由谁执行（mediaserverd 的注入不稳定，SpringBoard 每次都行）
-    NSString *probe = @"/var/mobile/Media/DCIM/.vcamvol-write-test";
-    NSFileManager *fm0 = [NSFileManager defaultManager];
-    BOOL canWrite = [@"ok" writeToFile:probe atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    [fm0 removeItemAtPath:probe error:NULL];
-    VVLog(@"AG1 enter pid=%d name=%@ canWriteDCIM=%d", getpid(), pname, canWrite);
-    if (!canWrite) {
-        VVLog(@"AG2 skip (no DCIM write access)");
-        return;
-    }
     static BOOL running = NO;
     if (running) return;
     running = YES;
+    VVLog(@"AG0 scheduled (pid=%d)", getpid());
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        VVLog(@"AG3 delayed start");
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
             @try {
+                NSString *pname = [[NSProcessInfo processInfo] processName];
                 NSFileManager *fm = [NSFileManager defaultManager];
 
+                NSString *probe = @"/var/mobile/Media/DCIM/.vcamvol-write-test";
+                BOOL canWrite = [@"ok" writeToFile:probe atomically:YES
+                                           encoding:NSUTF8StringEncoding error:nil];
+                if (canWrite) [fm removeItemAtPath:probe error:NULL];
+                VVLog(@"AG1 pid=%d name=%@ canWriteDCIM=%d", getpid(), pname, canWrite);
+                if (!canWrite) {
+                    VVLog(@"AG2 skip: 没有 DCIM 写权限");
+                    return;
+                }
 
                 NSString *sig = vv_file_sig(VCAM_SRC);
                 NSString *saved = [NSString stringWithContentsOfFile:VCAM_STATE
@@ -468,7 +469,7 @@ static void vv_auto_grade(void) {
                             if ([check isEqualToString:now]) {
                                 NSDictionary *attrs = [fm attributesOfItemAtPath:VCAM_SRC error:nil];
                                 unsigned long long size = attrs ? [attrs fileSize] : 0;
-                                if (size > 20000 && canWrite) {
+                                if (size > 20000) {
                                     VVLog(@"AG6 new video %llu bytes, grading...", size);
                                     __block BOOL finished = NO;
                                     vv_grade_file(VCAM_SRC, VCAM_TMP, ^{ finished = YES; });
@@ -483,7 +484,7 @@ static void vv_auto_grade(void) {
                                 } else {
                                     [check writeToFile:VCAM_STATE atomically:YES
                                               encoding:NSUTF8StringEncoding error:nil];
-                                    VVLog(@"AG6 skip: size=%llu canWrite=%d", size, canWrite);
+                                    VVLog(@"AG6 skip small file (%llu)", size);
                                 }
                             }
                         }

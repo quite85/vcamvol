@@ -186,7 +186,6 @@ static void VVPost(const char *name) {
             c[@"enabled"] = @NO;
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
-            VVPost(NOTIFY_TOGGLE);
             [[VVPanel shared] hideNow];
         }]];
     } else {
@@ -196,7 +195,6 @@ static void VVPost(const char *name) {
             c[@"masterEnabled"] = @YES;
             VVWriteConfig(c);
             VVPost(NOTIFY_STATE);
-            VVPost(NOTIFY_TOGGLE);
             [[VVPanel shared] hideNow];
         }]];
     }

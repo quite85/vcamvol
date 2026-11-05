@@ -261,6 +261,53 @@ static void vv_startPoll(void) {
     });
 }
 
+
+#pragma mark - 把 Virtual Cam 的英文界面翻译成中文（运行时拦截，不改它的文件）
+
+static NSString *VVL10N(NSString *s) {
+    if (![s isKindOfClass:[NSString class]]) return s;
+    static NSDictionary *map;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            @"Choose Media":          @"选择视频",
+            @"Toggle Virtual Camera": @"开关虚拟相机",
+            @"Cancel":                @"取消",
+            @"Virtual Cam":           @"虚拟相机",
+            @"Enabled system-wide":   @"全局已启用",
+            @"Disabled":              @"已禁用",
+        };
+    });
+    NSString *t = map[s];
+    if (t) {
+        VVLog(@"translate: %@ -> %@", s, t);
+        return t;
+    }
+    return s;
+}
+
+// 拦截 addAction:，把每个按钮的标题换成中文
+static void (*orig_addAction)(id, SEL, UIAlertAction *);
+static void vv_addAction(id self, SEL _cmd, UIAlertAction *action) {
+    @try {
+        NSString *title = [action valueForKey:@"title"];
+        NSString *zh = VVL10N(title);
+        if (zh && ![zh isEqualToString:title]) {
+            [action setValue:zh forKey:@"title"];
+        }
+    } @catch (NSException *e) {}
+    if (orig_addAction) orig_addAction(self, _cmd, action);
+}
+
+static void vv_install_l10n(void) {
+    MSHookMsgExFn hook = (MSHookMsgExFn)dlsym(RTLD_DEFAULT, "MSHookMessageEx");
+    if (!hook) { VVLog(@"l10n: 没有 MSHookMessageEx"); return; }
+    Class cls = [UIAlertController class];
+    if (!cls) { VVLog(@"l10n: 没有 UIAlertController"); return; }
+    hook(cls, @selector(addAction:), (IMP)vv_addAction, (IMP *)&orig_addAction);
+    VVLog(@"l10n hook installed (addAction:)");
+}
+
 %ctor {
     @autoreleasepool {
         VVLog(@"===== vcamvol loaded (pid %d) =====", getpid());
@@ -277,6 +324,7 @@ static void vv_startPoll(void) {
             VVLog(@"class %@ / 方法都不存在", pair[0]);
         }
         VVLog(@"volume hook bound=%d", bound);
+        vv_install_l10n();
 
         // 每 15 秒给 Virtual Cam 发一次 prepare，让解码器保持热状态，
         // 减少打开相机时那几秒真实画面闪动

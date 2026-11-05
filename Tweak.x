@@ -66,6 +66,11 @@ static void VVPost(const char *name) {
 #pragma mark - 面板
 
 // 不拦截触摸的视图：只有子视图（比如弹窗按钮）才响应，其余触点直接穿透给系统
+// 「视频渲染」用到的路径与前置声明
+#define VV_SRC @"/var/mobile/Media/DCIM/vcam.mp4"
+#define VV_TMP @"/var/mobile/Media/DCIM/.vcamvol-render.mp4"
+static BOOL vv_grade_file(NSString *src, NSString *dst);
+
 @interface VVPassthroughView : UIView
 @end
 @implementation VVPassthroughView
@@ -383,14 +388,14 @@ static NSString *vv_file_sig(NSString *path) {
 }
 
 // 用 AVFoundation 导出：对每一帧套 CIGammaAdjust(0.5464) 抵消 Virtual Cam 的 1.83 压缩
-static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
+// 对当前 vcam.mp4 做一次 gamma 补偿，成功返回 YES
+// 只在用户点「视频渲染」时调用；用 run loop 推进导出（命令行/非 App 环境必需）
+static BOOL vv_grade_file(NSString *src, NSString *dst) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:src] options:nil];
     if ([[asset tracksWithMediaType:AVMediaTypeVideo] count] == 0) {
-        VVLog(@"grade: 没有视频轨，跳过");
-        if (done) done();
-        return;
+        VVLog(@"render: 没有视频轨");
+        return NO;
     }
-
     AVMutableVideoComposition *comp =
         [AVMutableVideoComposition videoCompositionWithAsset:asset
                                    applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *req) {
@@ -399,45 +404,44 @@ static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
             CIFilter *g = [CIFilter filterWithName:@"CIGammaAdjust"];
             [g setValue:@(0.5464) forKey:@"inputPower"];
             [g setValue:img forKey:kCIInputImageKey];
-            CIImage *o = g.outputImage;
-            if (o) img = o;
+            if (g.outputImage) img = g.outputImage;
         } @catch (NSException *e) {}
         [req finishWithImage:img context:nil];
     }];
-
     AVAssetExportSession *ex = [[AVAssetExportSession alloc] initWithAsset:asset
                                                              presetName:AVAssetExportPresetHighestQuality];
-    if (!ex) { VVLog(@"grade: 无法创建导出会话"); if (done) done(); return; }
+    if (!ex) { VVLog(@"render: 无法创建导出会话"); return NO; }
     ex.videoComposition = comp;
     ex.outputURL = [NSURL fileURLWithPath:dst];
     ex.outputFileType = AVFileTypeMPEG4;
     ex.shouldOptimizeForNetworkUse = YES;
-    VVLog(@"grade: 开始转码 %@ -> %@", src, dst);
+    VVLog(@"render: 开始导出");
 
-    [ex exportAsynchronouslyWithCompletionHandler:^{
-        if (ex.status == AVAssetExportSessionStatusCompleted) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSError *err = nil;
-            [fm removeItemAtPath:src error:NULL];
-            if ([fm moveItemAtPath:dst toPath:src error:&err]) {
-                VVLog(@"grade: 完成，已替换 vcam.mp4");
-                // 递增 generation，让 Virtual Cam 重新读取
-                NSMutableDictionary *c = VVReadConfig();
-                NSInteger gen = [c[@"generation"] integerValue] + 1;
-                c[@"generation"] = @(gen);
-                c[@"enabled"] = @YES;
-                c[@"masterEnabled"] = @YES;
-                VVWriteConfig(c);
-                VVPost(NOTIFY_STATE);
-            } else {
-                VVLog(@"grade: 替换失败 %@", err);
-            }
-        } else {
-            VVLog(@"grade: 失败 status=%ld err=%@", (long)ex.status, ex.error);
-            [[NSFileManager defaultManager] removeItemAtPath:dst error:NULL];
+    [ex exportAsynchronouslyWithCompletionHandler:^{}];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:900];
+    while (ex.status == AVAssetExportSessionStatusWaiting ||
+           ex.status == AVAssetExportSessionStatusExporting ||
+           ex.status == AVAssetExportSessionStatusUnknown) {
+        if ([limit timeIntervalSinceNow] < 0) break;
+        @autoreleasepool {
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
         }
-        if (done) done();
-    }];
+    }
+    VVLog(@"render: 导出结束 status=%ld", (long)ex.status);
+    if (ex.status != AVAssetExportSessionStatusCompleted) {
+        [[NSFileManager defaultManager] removeItemAtPath:dst error:NULL];
+        return NO;
+    }
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm removeItemAtPath:src error:NULL];
+    NSError *err = nil;
+    if (![fm moveItemAtPath:dst toPath:src error:&err]) {
+        VVLog(@"render: 替换失败 %@", err);
+        return NO;
+    }
+    [fm setAttributes:@{NSFileOwnerAccountName: @"mobile"} ofItemAtPath:src error:nil];
+    return YES;
 }
 
 %ctor {

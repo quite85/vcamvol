@@ -426,9 +426,14 @@ static void vv_grade_file(NSString *src, NSString *dst, dispatch_block_t done) {
 //   2) 由 mediaserverd 里的实例执行——相机服务有 DCIM 写权限，SpringBoard 的沙盒会被拒
 static void vv_auto_grade(void) {
     NSString *pname = [[NSProcessInfo processInfo] processName];
-    VVLog(@"AG1 enter pid=%d name=%@", getpid(), pname);
-    if (![pname isEqualToString:@"mediaserverd"]) {
-        VVLog(@"AG2 skip (not mediaserverd)");
+    // 用实测写权限决定由谁执行（mediaserverd 的注入不稳定，SpringBoard 每次都行）
+    NSString *probe = @"/var/mobile/Media/DCIM/.vcamvol-write-test";
+    NSFileManager *fm0 = [NSFileManager defaultManager];
+    BOOL canWrite = [@"ok" writeToFile:probe atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [fm0 removeItemAtPath:probe error:NULL];
+    VVLog(@"AG1 enter pid=%d name=%@ canWriteDCIM=%d", getpid(), pname, canWrite);
+    if (!canWrite) {
+        VVLog(@"AG2 skip (no DCIM write access)");
         return;
     }
     static BOOL running = NO;
@@ -442,12 +447,6 @@ static void vv_auto_grade(void) {
             @try {
                 NSFileManager *fm = [NSFileManager defaultManager];
 
-                // 先测一下能不能写 DCIM（沙盒验证）
-                NSString *probe = @"/var/mobile/Media/DCIM/.vcamvol-write-test";
-                BOOL canWrite = [@"ok" writeToFile:probe atomically:YES
-                                           encoding:NSUTF8StringEncoding error:nil];
-                [fm removeItemAtPath:probe error:NULL];
-                VVLog(@"AG4 DCIM writable=%d", canWrite);
 
                 NSString *sig = vv_file_sig(VCAM_SRC);
                 NSString *saved = [NSString stringWithContentsOfFile:VCAM_STATE

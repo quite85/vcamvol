@@ -17,6 +17,7 @@ vcamgrader_FILES = tool/main.m
 vcamgrader_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 vcamgrader_FRAMEWORKS = Foundation AVFoundation CoreImage CoreMedia CoreVideo
 vcamgrader_INSTALL_PATH = /usr/libexec
+vcamgrader_CODESIGN_FLAGS = -Stool/entitlements.plist
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk

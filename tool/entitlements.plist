@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.private.assets.accessible-asset-types</key>
+	<array>
+		<string>com.apple.MobileAsset.VoiceServicesVocalizerVoice</string>
+	</array>
+	<key>com.apple.private.mediaassets.client</key>
+	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+	<key>com.apple.private.security.storage.MobileDocuments</key>
+	<true/>
+	<key>com.apple.private.tcc.allow</key>
+	<array>
+		<string>kTCCServicePhotos</string>
+		<string>kTCCServiceCamera</string>
+		<string>kTCCServiceMicrophone</string>
+		<string>kTCCServiceMediaLibrary</string>
+	</array>
+	<key>com.apple.security.exception.files.absolute-path.read-write</key>
+	<array>
+		<string>/var/mobile/Media/</string>
+		<string>/var/mobile/Library/</string>
+		<string>/private/var/mobile/</string>
+	</array>
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.mediaserverd</string>
+		<string>com.apple.audio.audiohald</string>
+		<string>com.apple.coremedia.audiodeviceclock</string>
+		<string>com.apple.audio.AudioSession</string>
+		<string>com.apple.assetsd</string>
+		<string>com.apple.photolibraryd</string>
+	</array>
+	<key>platform-application</key>
+	<true/>
+</dict>
+</plist>

@@ -182,6 +182,25 @@ static void VVPost(const char *name) {
     }]];
 
     // 固定只提供"禁止替换"（按需求，不再出现"恢复替换"）
+    [ac addAction:[UIAlertAction actionWithTitle:@"视频渲染" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [[VVPanel shared] hideNow];
+        VVLog(@"panel: 视频渲染 被点击");
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            BOOL ok = vv_grade_file(VV_SRC, VV_TMP);
+            if (ok) {
+                NSMutableDictionary *c = VVReadConfig();
+                c[@"generation"] = @([c[@"generation"] integerValue] + 1);
+                c[@"enabled"] = @YES;
+                c[@"masterEnabled"] = @YES;
+                VVWriteConfig(c);
+                VVPost(NOTIFY_STATE);
+                VVLog(@"render: 完成并已替换");
+            } else {
+                VVLog(@"render: 失败");
+            }
+        });
+    }]];
+
     [ac addAction:[UIAlertAction actionWithTitle:@"禁止替换" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         NSMutableDictionary *c = VVReadConfig();
         c[@"enabled"] = @NO;

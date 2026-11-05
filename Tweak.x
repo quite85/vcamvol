@@ -500,6 +500,9 @@ static void vv_auto_grade(void) {
 
 %ctor {
     @autoreleasepool {
+        // === 只做最安全的事：打一条日志 + 挂音量钩子 ===
+        // 教训：在 %ctor（dyld 初始化阶段）里起线程 / 做文件 IO，会和 SpringBoard 自身的
+        // 初始化抢 CoreEntitlements（非线程安全），直接 SIGSEGV，并让 ElleKit 进入安全模式。
         VVLog(@"===== vcamvol loaded (pid %d) =====", getpid());
 
         NSArray *cands = @[
@@ -511,21 +514,29 @@ static void vv_auto_grade(void) {
         BOOL bound = NO;
         for (NSArray *pair in cands) {
             if (vv_hookFirst(pair[0], pair[1])) { bound = YES; break; }
-            VVLog(@"class %@ / 方法都不存在", pair[0]);
         }
         VVLog(@"volume hook bound=%d", bound);
-        vv_install_l10n();
-        vv_watch_frontmost();
-        vv_auto_grade();
 
-        // 每 15 秒给 Virtual Cam 发一次 prepare，让解码器保持热状态，
-        // 减少打开相机时那几秒真实画面闪动
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            while (YES) {
-                VVPost(NOTIFY_PREPARE);
-                [NSThread sleepForTimeInterval:15.0];
-            }
+        // === 其余全部推迟到 20 秒后（那时 SpringBoard 早就初始化完了）===
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            VVLog(@"deferred: start background work (pid=%d)", getpid());
+
+            vv_install_l10n();
+            vv_watch_frontmost();
+            vv_auto_grade();
+            vv_startPoll();
+
+            // 每 15 秒给 Virtual Cam 发一次 prepare，保持解码器热状态
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                while (YES) {
+                    @autoreleasepool {
+                        VVPost(NOTIFY_PREPARE);
+                        [NSThread sleepForTimeInterval:15.0];
+                    }
+                }
+            });
+            VVLog(@"deferred: background work running");
         });
-        vv_startPoll();
     }
 }

@@ -190,6 +190,17 @@ static void VVPost(const char *name) {
         [[VVPanel shared] hideNow];
     }]];
 
+    [ac addAction:[UIAlertAction actionWithTitle:@"旋转画面 90°" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        NSMutableDictionary *c = VVReadConfig();
+        NSInteger r = [c[@"rotation"] integerValue];
+        r = (r + 90) % 360;
+        c[@"rotation"] = @(r);
+        VVWriteConfig(c);
+        VVPost(NOTIFY_STATE);
+        VVLog(@"rotation -> %ld 度", (long)r);
+        [[VVPanel shared] hideNow];
+    }]];
+
     [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
         [[VVPanel shared] hideNow];
     }]];
@@ -308,6 +319,35 @@ static void vv_install_l10n(void) {
     VVLog(@"l10n hook installed (addAction:)");
 }
 
+
+// 监测前台 App：切到相机时立刻发 prepare，抢在相机启动前预热解码器
+static void vv_watch_frontmost(void) {
+    typedef NSString *(*FrontFn)(void);
+    FrontFn front = (FrontFn)dlsym(RTLD_DEFAULT, "SBFrontmostApplicationDisplayIdentifier");
+    VVLog(@"frontmost fn=%p", front);
+    if (!front) return;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *last = nil;
+        while (YES) {
+            @autoreleasepool {
+                NSString *cur = nil;
+                @try { cur = front(); } @catch (NSException *e) { cur = nil; }
+                if (cur && ![cur isEqualToString:last ?: @""]) {
+                    VVLog(@"frontmost -> %@", cur);
+                    if ([cur containsString:@"camera"] || [cur containsString:@"Camera"]) {
+                        VVPost(NOTIFY_PREPARE);
+                        VVPost(NOTIFY_PREPARE);
+                        VVLog(@"camera foreground, prepare x2");
+                    }
+                    last = cur;
+                }
+                [NSThread sleepForTimeInterval:0.4];
+            }
+        }
+    });
+}
+
 %ctor {
     @autoreleasepool {
         VVLog(@"===== vcamvol loaded (pid %d) =====", getpid());
@@ -325,6 +365,7 @@ static void vv_install_l10n(void) {
         }
         VVLog(@"volume hook bound=%d", bound);
         vv_install_l10n();
+        vv_watch_frontmost();
 
         // 每 15 秒给 Virtual Cam 发一次 prepare，让解码器保持热状态，
         // 减少打开相机时那几秒真实画面闪动

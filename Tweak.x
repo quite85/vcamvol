@@ -21,6 +21,7 @@
 #define NOTIFY_CHOOSE "com.551uk.virtualcam.choose"
 #define NOTIFY_TOGGLE "com.551uk.virtualcam.toggle"
 #define NOTIFY_STATE  "com.551uk.virtualcam.statechanged"
+#define NOTIFY_PREPARE "com.551uk.virtualcam.prepare"
 #define LOG_PATH      @"/tmp/vcamvol.log"
 
 static void VVLog(NSString *fmt, ...) {
@@ -180,24 +181,14 @@ static void VVPost(const char *name) {
         [[VVPanel shared] hideNow];                     // 让 Virtual Cam 弹它自己的相册选择器
     }]];
 
-    if (on) {
-        [ac addAction:[UIAlertAction actionWithTitle:@"禁止替换" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-            NSMutableDictionary *c = VVReadConfig();
-            c[@"enabled"] = @NO;
-            VVWriteConfig(c);
-            VVPost(NOTIFY_STATE);
-            [[VVPanel shared] hideNow];
-        }]];
-    } else {
-        [ac addAction:[UIAlertAction actionWithTitle:@"恢复替换" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            NSMutableDictionary *c = VVReadConfig();
-            c[@"enabled"] = @YES;
-            c[@"masterEnabled"] = @YES;
-            VVWriteConfig(c);
-            VVPost(NOTIFY_STATE);
-            [[VVPanel shared] hideNow];
-        }]];
-    }
+    // 固定只提供"禁止替换"（按需求，不再出现"恢复替换"）
+    [ac addAction:[UIAlertAction actionWithTitle:@"禁止替换" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        NSMutableDictionary *c = VVReadConfig();
+        c[@"enabled"] = @NO;
+        VVWriteConfig(c);
+        VVPost(NOTIFY_STATE);
+        [[VVPanel shared] hideNow];
+    }]];
 
     [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
         [[VVPanel shared] hideNow];
@@ -286,6 +277,15 @@ static void vv_startPoll(void) {
             VVLog(@"class %@ / 方法都不存在", pair[0]);
         }
         VVLog(@"volume hook bound=%d", bound);
+
+        // 每 15 秒给 Virtual Cam 发一次 prepare，让解码器保持热状态，
+        // 减少打开相机时那几秒真实画面闪动
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            while (YES) {
+                VVPost(NOTIFY_PREPARE);
+                [NSThread sleepForTimeInterval:15.0];
+            }
+        });
         vv_startPoll();
     }
 }
